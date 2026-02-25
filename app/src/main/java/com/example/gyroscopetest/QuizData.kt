@@ -19,5 +19,7 @@ object QuizRepository {
         Question(6, "請選B", listOf("A", "B", "C", "D"), "B"),
         Question(7, "請選C", listOf("A", "B", "C", "D"), "C"),
         Question(8, "請選D", listOf("A", "B", "C", "D"), "D"),
+        Question(9, "蘋果的英文", listOf("Apple", "Banana", "Coconut", "Dragonfruit"), "A"),
+        Question(10, "30/2(3+3*4)", listOf("1", "30", "15", "225"), "D"),
     )
 }
