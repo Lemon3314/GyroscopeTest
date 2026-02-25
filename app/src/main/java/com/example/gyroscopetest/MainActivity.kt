@@ -144,31 +144,55 @@ fun AngleTestScreen(
     onCalibrate: () -> Unit
 ) {
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
-    val currentQuestion = gameState.currentQuestion
-    val isLocked = gameState.isLocked()
+
+    // --- GameState管理
+    val currentQuestion = gameState.currentQuestion //目前問題
+    val isLocked = gameState.isLocked() //是否被鎖定懲罰
+    val feedback = gameState.feedback //當前的反饋
+    val isShowingFeedback = gameState.isShowingFeedback() //是否正在反饋中
+
+    // 動態背景色
+    val backgroundColor = when (feedback) {
+        FeedbackType.CORRECT -> Color(0xFFE8F5E9) // 答對：淡綠色
+        FeedbackType.WRONG -> Color(0xFFFFEBEE)   // 答錯：淡紅色
+        else -> Color.White
+    }
 
     // --- 答題確認進度邏輯 ---
     var progress by remember { mutableStateOf(0f) }
 
     // 當 selectedOption 改變或被鎖定時，處理進度條
     LaunchedEffect(selectedOption, isLocked) {
-        if (selectedOption != "" && !isLocked) {
+        // 如果沒選中或被鎖定，歸零並退出
+        if (selectedOption == "" || isLocked) {
             progress = 0f
+            return@LaunchedEffect
+        }
+
+        // 使用循環達成連續觸發
+        while (selectedOption != "" && !isLocked) {
+            progress = 0f
+            val duration = 2000L // 第一次觸發需要 2 秒
             val startTime = System.currentTimeMillis()
-            val duration = 1500L // 停留 1.5 秒送出
 
+            // 進度條增加過程
             while (System.currentTimeMillis() - startTime < duration) {
+                if (selectedOption == "" || isLocked) {
+                    progress = 0f
+                    return@LaunchedEffect
+                }
                 progress = (System.currentTimeMillis() - startTime).toFloat() / duration
-                delay(16) // 約 60fps
-                if (selectedOption == "" || isLocked) break
+                delay(16)
             }
 
-            if (progress >= 0.95f) {
-                gameState.submitAnswer(selectedOption)
-                progress = 0f
-            }
-        } else {
+            // 觸發答題
+            gameState.submitAnswer(selectedOption)
             progress = 0f
+
+            // --- 關鍵：連續觸發間隔 ---
+            // 答完後，強制等待 1 秒（這段時間 progress 為 0）
+            // 這讓使用者有時間看到「恭喜答對」並決定是否移開游標
+            delay(2000L)
         }
     }
 
@@ -193,19 +217,48 @@ fun AngleTestScreen(
             modifier = Modifier.align(Alignment.Center).padding(horizontal = 100.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // --- A. 玩家狀態顯示 (最上方) ---
             Text("得分: ${gameState.score} | 對: ${gameState.correctCount} 錯: ${gameState.wrongCount}",
                 fontSize = 14.sp, color = Color.Gray)
 
             Spacer(Modifier.height(16.dp))
 
+            // --- B. 回饋文字預留區 (這部分就是你要求的位置) ---
+            // 為了不讓畫面跳動，我們固定保留這個高度，或者使用 AnimatedVisibility
+            Box(modifier = Modifier.height(60.dp), contentAlignment = Alignment.Center) {
+                if (isShowingFeedback) {
+                    Text(
+                        text = if (feedback == FeedbackType.CORRECT) "✨ 恭喜答對！ ✨" else "❌ 答錯了！ ❌",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (feedback == FeedbackType.CORRECT) Color(0xFF2E7D32) else Color(0xFFC62828),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+            // --- C. 題目文字 (始終顯示) ---
+            Spacer(Modifier.height(10.dp))
             Text(text = "Q: ${currentQuestion.text}", fontSize = 22.sp,
                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-
+            // --- D. 鎖定狀態 (出現在題目下方) ---
             if (isLocked) {
-                Spacer(Modifier.height(10.dp))
-                Text("答錯懲罰！鎖定中 (${gameState.getLockRemainingSeconds()}s)",
-                    color = Color.Red, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(15.dp))
+                Box(
+                    modifier = Modifier
+                        .background(Color.Red.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "答錯懲罰：鎖定中 (${gameState.getLockRemainingSeconds()}s)",
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
+
+
+
 
             Spacer(Modifier.height(30.dp))
             Button(onClick = onCalibrate) { Text("校正中心點") }
