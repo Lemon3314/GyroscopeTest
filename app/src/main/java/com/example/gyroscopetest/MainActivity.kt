@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private val moveSensitivity = 4.0f // 配合死區，靈敏度調高一點
     private val angleThreshold = 20f
 
-    // 當前選中的答案狀態
+    // 當前選中的答案狀
     private var selectedOption by mutableStateOf("請傾斜手機進行答題")
 
     override fun onCreate(savedInstanceState: Bundle?) {
