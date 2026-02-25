@@ -1,5 +1,7 @@
 package com.example.gyroscopetest
 
+
+
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -8,13 +10,14 @@ import android.hardware.SensorManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,27 +30,32 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private var gyroSensor: Sensor? = null
 
+    // 陀螺儀狀態
     private var angleX by mutableStateOf(0f)
     private var angleY by mutableStateOf(0f)
     private var timestamp: Long = 0
 
+    // 校正與游標
     private var offsetPitch by mutableStateOf(0f)
     private var offsetRoll by mutableStateOf(0f)
-
     private var cursorX by mutableStateOf(0.5f)
     private var cursorY by mutableStateOf(0.5f)
 
-    private val moveSensitivity = 4.0f // 配合死區，靈敏度調高一點
+    private val moveSensitivity = 4.0f
     private val angleThreshold = 20f
 
-    // 當前選中的答案狀
-    private var selectedOption by mutableStateOf("請傾斜手機進行答題")
+    // 當前偵測到的選項 (邏輯判定)
+    private var selectedOption by mutableStateOf("")
+
+    // 實例化遊戲管理員
+    private val gameState = GameStateManager()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,15 +65,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContent {
             val degX = Math.toDegrees(angleX.toDouble()).toFloat()
             val degY = Math.toDegrees(angleY.toDouble()).toFloat()
-            val relativePitch = degX - offsetPitch
-            val relativeRoll = degY - offsetRoll
 
             AngleTestScreen(
-                relativePitch = relativePitch.toInt(),
-                relativeRoll = relativeRoll.toInt(),
+                relativePitch = (degX - offsetPitch).toInt(),
+                relativeRoll = (degY - offsetRoll).toInt(),
                 cursorX = cursorX,
                 cursorY = cursorY,
                 selectedOption = selectedOption,
+                gameState = gameState,
                 onCalibrate = {
                     offsetPitch = degX
                     offsetRoll = degY
@@ -87,22 +94,19 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val curRelPitch = Math.toDegrees(angleX.toDouble()).toFloat() - offsetPitch
             val curRelRoll = Math.toDegrees(angleY.toDouble()).toFloat() - offsetRoll
 
-            val effectiveRoll = calculateEffectivePush(curRelRoll, angleThreshold)
-            val effectivePitch = calculateEffectivePush(curRelPitch, angleThreshold)
-
-            val dx = effectiveRoll * moveSensitivity * dt
-            val dy = effectivePitch * moveSensitivity * dt
+            val dx = calculateEffectivePush(curRelRoll, angleThreshold) * moveSensitivity * dt
+            val dy = calculateEffectivePush(curRelPitch, angleThreshold) * moveSensitivity * dt
 
             cursorX = (cursorX + dx / 100f).coerceIn(0f, 1f)
             cursorY = (cursorY + dy / 100f).coerceIn(0f, 1f)
 
-            // --- 碰撞偵測邏輯 ---
+            // 碰撞偵測：鎖定邏輯
             selectedOption = when {
-                cursorY < 0.15f -> "選項 A (上方)"
-                cursorY > 0.85f -> "選項 B (下方)"
-                cursorX < 0.20f -> "選項 C (左方)"
-                cursorX > 0.80f -> "選項 D (右方)"
-                else -> "請移動游標至答案區"
+                cursorY < 0.15f -> "A"
+                cursorY > 0.85f -> "B"
+                cursorX < 0.20f -> "C"
+                cursorX > 0.80f -> "D"
+                else -> ""
             }
         }
         timestamp = event.timestamp
@@ -136,154 +140,138 @@ fun AngleTestScreen(
     cursorX: Float,
     cursorY: Float,
     selectedOption: String,
+    gameState: GameStateManager,
     onCalibrate: () -> Unit
 ) {
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
-    val activeColor = Color(0xFF4CAF50)
-    val inactiveColor = Color(0xFFE0E0E0).copy(alpha = 0.3f)
+    val currentQuestion = gameState.currentQuestion
+    val isLocked = gameState.isLocked()
+
+    // --- 答題確認進度邏輯 ---
+    var progress by remember { mutableStateOf(0f) }
+
+    // 當 selectedOption 改變或被鎖定時，處理進度條
+    LaunchedEffect(selectedOption, isLocked) {
+        if (selectedOption != "" && !isLocked) {
+            progress = 0f
+            val startTime = System.currentTimeMillis()
+            val duration = 1500L // 停留 1.5 秒送出
+
+            while (System.currentTimeMillis() - startTime < duration) {
+                progress = (System.currentTimeMillis() - startTime).toFloat() / duration
+                delay(16) // 約 60fps
+                if (selectedOption == "" || isLocked) break
+            }
+
+            if (progress >= 0.95f) {
+                gameState.submitAnswer(selectedOption)
+                progress = 0f
+            }
+        } else {
+            progress = 0f
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(if (isLocked) Color(0xFFFFEBEE) else Color.White)
             .onGloballyPositioned { screenSize = it.size }
     ) {
-        // --- 1. 四週答題感應區 (加大左右區塊) ---
-        // 上 (A)
-        AnswerBox(
-            modifier = Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter),
-            text = "選項 A",
-            isActive = cursorY < 0.15f,
-            activeColor = activeColor,
-            inactiveColor = inactiveColor
-        )
-        // 下 (B)
-        AnswerBox(
-            modifier = Modifier.fillMaxWidth().height(100.dp).align(Alignment.BottomCenter),
-            text = "選項 B",
-            isActive = cursorY > 0.85f,
-            activeColor = activeColor,
-            inactiveColor = inactiveColor
-        )
-        // 左 (C) - 加大寬度
-        AnswerBox(
-            modifier = Modifier.fillMaxHeight().width(90.dp).align(Alignment.CenterStart),
-            text = "選項\nC",
-            isActive = cursorX < 0.20f,
-            activeColor = activeColor,
-            inactiveColor = inactiveColor
-        )
-        // 右 (D) - 加大寬度
-        AnswerBox(
-            modifier = Modifier.fillMaxHeight().width(90.dp).align(Alignment.CenterEnd),
-            text = "選項\nD",
-            isActive = cursorX > 0.80f,
-            activeColor = activeColor,
-            inactiveColor = inactiveColor
-        )
+        // --- 1. 選項區塊 ---
+        AnswerBox(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter),
+            "A: ${currentQuestion.options[0]}", selectedOption == "A")
+        AnswerBox(Modifier.fillMaxWidth().height(100.dp).align(Alignment.BottomCenter),
+            "B: ${currentQuestion.options[1]}", selectedOption == "B")
+        AnswerBox(Modifier.fillMaxHeight().width(90.dp).align(Alignment.CenterStart),
+            "C:\n${currentQuestion.options[2]}", selectedOption == "C")
+        AnswerBox(Modifier.fillMaxHeight().width(90.dp).align(Alignment.CenterEnd),
+            "D:\n${currentQuestion.options[3]}", selectedOption == "D")
 
-        // --- 2. 中央題目顯示區 ---
+        // --- 2. 中央資訊區 ---
         Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(horizontal = 100.dp), // 避開左右 Box
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = 100.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "題目：",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                lineHeight = 28.sp
-            )
+            Text("得分: ${gameState.score} | 對: ${gameState.correctCount} 錯: ${gameState.wrongCount}",
+                fontSize = 14.sp, color = Color.Gray)
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
-            // 顯示目前游標選中的狀態
-            Box(
-                modifier = Modifier
-                    .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
-                    .padding(12.dp)
-            ) {
-                Text(
-                    text = selectedOption,
-                    color = if (selectedOption.contains("選項")) Color(0xFF2E7D32) else Color.Gray,
-                    fontWeight = FontWeight.Medium
-                )
+            Text(text = "Q: ${currentQuestion.text}", fontSize = 22.sp,
+                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+
+            if (isLocked) {
+                Spacer(Modifier.height(10.dp))
+                Text("答錯懲罰！鎖定中 (${gameState.getLockRemainingSeconds()}s)",
+                    color = Color.Red, fontWeight = FontWeight.Bold)
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
-
-            Button(onClick = onCalibrate) {
-                Text("校正並重置游標")
-            }
-
-            Text(
-                text = "角度: ${relativePitch}° / ${relativeRoll}°",
-                fontSize = 12.sp,
-                color = Color.LightGray,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            Spacer(Modifier.height(30.dp))
+            Button(onClick = onCalibrate) { Text("校正中心點") }
         }
 
-        // --- 3. 游標 (小白點) ---
-        // 使用相對座標計算在螢幕上的偏移
-        val cursorSize = 30.dp
+        // --- 3. 游標與進度環 ---
+        val animatedProgress by animateFloatAsState(targetValue = progress)
+
         Box(
             modifier = Modifier
                 .offset(
                     x = (cursorX * (screenSize.width / 2.75f)).dp,
                     y = (cursorY * (screenSize.height / 2.75f)).dp
                 )
-                .size(cursorSize)
-                .background(Color(0xFFE91E63), CircleShape)
-                .border(2.dp, Color.White, CircleShape)
-        )
+                .size(45.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // 背景白點
+            Box(modifier = Modifier.size(25.dp).background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
+
+            // 進度環 (視覺回饋)
+            if (progress > 0f) {
+                CircularProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFFE91E63),
+                    strokeWidth = 4.dp,
+                )
+            }
+        }
     }
 }
 
 @Composable
-fun AnswerBox(
-    modifier: Modifier,
-    text: String,
-    isActive: Boolean,
-    activeColor: Color,
-    inactiveColor: Color
-) {
+fun AnswerBox(modifier: Modifier, text: String, isActive: Boolean) {
+    val backgroundColor = if (isActive) Color(0xFF4CAF50) else Color(0xFFE0E0E0).copy(alpha = 0.3f)
     Box(
-        modifier = modifier
-            .background(if (isActive) activeColor else inactiveColor)
-            .border(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+        modifier = modifier.background(backgroundColor).border(1.dp, Color.LightGray.copy(0.5f)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = text,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (isActive) Color.White else Color.Gray,
-            textAlign = TextAlign.Center
-        )
+        Text(text = text, fontSize = 16.sp, fontWeight = FontWeight.Black,
+            color = if (isActive) Color.White else Color.Gray, textAlign = TextAlign.Center)
     }
 }
 
 @Preview(showBackground = true, widthDp = 360, heightDp = 640)
 @Composable
 fun GyroPreview() {
-
+    val gameState = GameStateManager()
     var offsetRoll = 0
     var offsetPitch = 0
     var cursorX = 0.5f
     var cursorY = 0.5f
     var selectedOption = "Text"
+    var degX = 0
+    var degY =0
     AngleTestScreen(
-        relativePitch = 0,
-        relativeRoll = 0,
+        relativePitch = (degX - offsetPitch).toInt(),
+        relativeRoll = (degY - offsetRoll).toInt(),
         cursorX = cursorX,
         cursorY = cursorY,
         selectedOption = selectedOption,
+        gameState = gameState,
         onCalibrate = {
-            offsetPitch = 0
-            offsetRoll = 0
+            offsetPitch = degX
+            offsetRoll = degY
             cursorX = 0.5f
             cursorY = 0.5f
         }
