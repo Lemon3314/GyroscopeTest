@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -67,8 +69,111 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 }
 
+
 @Composable
 fun AngleTestScreen(viewModel: GameViewModel) {
+    // 根據 ViewModel 的場景切換畫面
+    when (viewModel.currentScene) {
+        GameScene.START -> StartScreen(onStart = { viewModel.startGame() })
+        GameScene.PLAYING -> QuizPlayScreen(viewModel = viewModel)
+        GameScene.RESULT -> ResultScreen(
+            score = viewModel.score,
+            correct = viewModel.correctCount,
+            wrong = viewModel.wrongCount,
+            onRestart = { viewModel.backToStart() }
+        )
+    }
+}
+
+
+// --- 新增：起始頁面 ---
+@Composable
+fun StartScreen(onStart: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF5F5F5))
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.gyroicon),
+            contentDescription = "Logo",
+            modifier = Modifier.size(120.dp)
+        )
+        Text(
+            text = "GyroQuiz",
+            fontSize = 40.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFF333333)
+        )
+        Text("體感知識競賽", fontSize = 18.sp, color = Color.Gray)
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("遊戲規則：", fontWeight = FontWeight.Bold)
+                Text("1. 傾斜手機控制紅點移動。")
+                Text("2. 將紅點停留在選項上 2 秒作答。")
+                Text("3. 答錯將鎖定 5 秒無法移動。")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Button(
+            onClick = onStart,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66C2EE))
+        ) {
+            Text("開始挑戰", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+
+// --- 新增：結算頁面 ---
+@Composable
+fun ResultScreen(score: Int, correct: Int, wrong: Int, onRestart: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFFE8F5E9)).padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("挑戰結束！", fontSize = 32.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(24.dp))
+
+        Text("總分", fontSize = 20.sp)
+        Text("$score", fontSize = 80.sp, fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("答對", color = Color.Gray)
+                Text("$correct", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("答錯", color = Color.Gray)
+                Text("$wrong", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(64.dp))
+
+        OutlinedButton(
+            onClick = onRestart,
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) {
+            Text("返回主選單", fontSize = 18.sp)
+        }
+    }
+}
+
+
+// 將原本 QuizPlay 的內容封裝到這個 Composable
+@Composable
+fun QuizPlayScreen(viewModel: GameViewModel) {
     // 從 ViewModel 讀取狀態
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current

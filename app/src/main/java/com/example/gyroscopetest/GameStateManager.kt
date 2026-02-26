@@ -19,12 +19,19 @@ object GameConfig {
     const val BOUND_OPTION_D_LEFT = 0.80f
 }
 
+//定義遊戲場景
+enum class GameScene { START, PLAYING, RESULT }
+
+//定義回饋類型
 enum class FeedbackType { NONE, CORRECT, WRONG }
 
 class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
 
     // --- 觀測型狀態 (UI 會自動監聽這些變數) ---
 
+    // --- 新增：當前場景狀態 ---
+    var currentScene by mutableStateOf(GameScene.START)
+        private set
 
     // --- [關鍵數據：存檔區] ---
     // 使用 SavedStateHandle 讓資料在「App 被後台殺掉」後仍能恢復
@@ -78,6 +85,29 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
             startLockTimer()
         }
     }
+    // --- 新增：場景切換邏輯 ---
+
+    fun startGame() {
+        // 重置所有分數與題目
+        score = 0
+        correctCount = 0
+        wrongCount = 0
+        currentIndexInShuffled = 0
+        shuffledIndices = QuizRepository.questions.indices.shuffled()
+
+        // 切換到遊戲中
+        currentScene = GameScene.PLAYING
+        calibrateCenter() // 開始時自動校正一次
+    }
+
+    fun finishGame() {
+        currentScene = GameScene.RESULT
+    }
+
+    fun backToStart() {
+        currentScene = GameScene.START
+    }
+
 
     private fun persist() {
         savedState["score"] = score
@@ -168,7 +198,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
             score += 10
             correctCount++
             triggerFeedback(FeedbackType.CORRECT, 1500)
-            goToNextQuestion()
+
         } else {
             score = (score - 5).coerceAtLeast(0)
             wrongCount++
@@ -179,6 +209,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
             startLockTimer() // 立即啟動 UI 觀測計時器
         }
 
+        goToNextQuestion()
         cursorX = 0.5f
         cursorY = 0.5f
         selectedOption = ""
@@ -190,13 +221,17 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         feedbackUntilTimestamp = System.currentTimeMillis() + duration
     }
 
+    // 修改原有的 goToNextQuestion，加入「結束判斷」
     private fun goToNextQuestion() {
         if (currentIndexInShuffled < shuffledIndices.size - 1) {
             currentIndexInShuffled++
         } else {
-            shuffledIndices = QuizRepository.questions.indices.shuffled()
-            currentIndexInShuffled = 0
+            // 如果題庫答完了，進入結算畫面
+            finishGame()
         }
         persist()
     }
+
+
+
 }
