@@ -1,71 +1,81 @@
 package com.example.gyroscopetest
 
 import androidx.compose.runtime.*
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
 
-// 定義回饋類型
+// 回饋類型定義
 enum class FeedbackType { NONE, CORRECT, WRONG }
 
-class GameStateManager {
-    // 1. 題目隨機化邏輯
-    private var shuffledIndices = QuizRepository.questions.indices.shuffled()
-    private var currentIndexInShuffled by mutableIntStateOf(0)
+class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
 
-    // 遊戲數據
-    var score by mutableIntStateOf(0)
-    var correctCount by mutableIntStateOf(0)
-    var wrongCount by mutableIntStateOf(0)
+    // --- 狀態持久化 (SavedStateHandle) ---
+    // 使用 SavedStateHandle 確保 App 被系統殺掉後仍能恢復數據
+    var score by mutableIntStateOf(savedState["score"] ?: 0)
+    var correctCount by mutableIntStateOf(savedState["correctCount"] ?: 0)
+    var wrongCount by mutableIntStateOf(savedState["wrongCount"] ?: 0)
 
-    // 2. 狀態管理：回饋與鎖定
-    var feedback by mutableStateOf(FeedbackType.NONE) // 控制畫面顏色與文字
-    private var feedbackUntilTimestamp by mutableLongStateOf(0L) // 回饋顯示截止時間
-    private var lockUntilTimestamp by mutableLongStateOf(0L)     // 答錯鎖定截止時間
+    // 題目順序持久化
+    private var shuffledIndices: List<Int> = savedState.get<List<Int>>("indices")
+        ?: QuizRepository.questions.indices.shuffled()
 
-    // 取得當前題目
+    var currentIndexInShuffled by mutableIntStateOf(savedState["currentIndex"] ?: 0)
+
+    // --- 臨時視覺狀態 (不需要持久化) ---
+    var feedback by mutableStateOf(FeedbackType.NONE)
+    private var feedbackUntilTimestamp by mutableLongStateOf(0L)
+
+    // 鎖定狀態持久化 (防止玩家透過重開 App 規避懲罰)
+    private var lockUntilTimestamp by mutableLongStateOf(savedState["lockUntil"] ?: 0L)
+
+    // 取得當前題目邏輯
     val currentQuestion: Question
         get() = QuizRepository.questions[shuffledIndices[currentIndexInShuffled]]
 
-    // 檢查是否處於「回饋顯示中」
+    /**
+     * 持久化存檔：每次重要數據變動時呼叫
+     */
+    private fun persist() {
+        savedState["score"] = score
+        savedState["correctCount"] = correctCount
+        savedState["wrongCount"] = wrongCount
+        savedState["indices"] = shuffledIndices
+        savedState["currentIndex"] = currentIndexInShuffled
+        savedState["lockUntil"] = lockUntilTimestamp
+    }
+
+    // --- 業務邏輯方法 ---
+
     fun isShowingFeedback(): Boolean {
         val active = System.currentTimeMillis() < feedbackUntilTimestamp
-        if (!active) feedback = FeedbackType.NONE // 時間到自動重設回饋類型
+        if (!active) feedback = FeedbackType.NONE
         return active
     }
 
-    // 檢查是否處於「答錯鎖定」狀態 (維持原本的 3 秒邏輯)
-    fun isLocked(): Boolean {
-        return System.currentTimeMillis() < lockUntilTimestamp
-    }
+    fun isLocked(): Boolean = System.currentTimeMillis() < lockUntilTimestamp
 
-    // 取得剩餘鎖定秒數 (UI 顯示用)
     fun getLockRemainingSeconds(): Int {
         val remaining = lockUntilTimestamp - System.currentTimeMillis()
         return if (remaining > 0) (remaining / 1000).toInt() + 1 else 0
     }
 
-    /**
-     * 提交答案
-     * @param answerCode "A", "B", "C" 或 "D"
-     */
     fun submitAnswer(answerCode: String) {
-        // 如果正在顯示回饋或處於鎖定狀態，則不接受新答案
         if (isShowingFeedback() || isLocked()) return
 
         if (answerCode == currentQuestion.correctAnswerCode) {
-            // --- 答對邏輯 ---
             score += 10
             correctCount++
-            triggerFeedback(FeedbackType.CORRECT, 1500) // 顯示綠色回饋 1.5 秒
+            triggerFeedback(FeedbackType.CORRECT, 1500)
             goToNextQuestion()
         } else {
-            // --- 答錯邏輯 ---
             score = (score - 5).coerceAtLeast(0)
             wrongCount++
-            triggerFeedback(FeedbackType.WRONG, 1500)    // 顯示紅色回饋 1.5 秒
-            lockUntilTimestamp = System.currentTimeMillis() + 5000 // 維持原本 5 秒鎖定
+            triggerFeedback(FeedbackType.WRONG, 1500)
+            lockUntilTimestamp = System.currentTimeMillis() + 5000 // 5秒懲罰
         }
+        persist() // 存檔
     }
 
-    // 觸發視覺回饋
     private fun triggerFeedback(type: FeedbackType, duration: Long) {
         feedback = type
         feedbackUntilTimestamp = System.currentTimeMillis() + duration
@@ -75,12 +85,9 @@ class GameStateManager {
         if (currentIndexInShuffled < shuffledIndices.size - 1) {
             currentIndexInShuffled++
         } else {
-            resetQuizOrder()
+            shuffledIndices = QuizRepository.questions.indices.shuffled()
+            currentIndexInShuffled = 0
         }
-    }
-
-    private fun resetQuizOrder() {
-        shuffledIndices = QuizRepository.questions.indices.shuffled()
-        currentIndexInShuffled = 0
+        persist()
     }
 }
