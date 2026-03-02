@@ -8,29 +8,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 
+
+
+// 【Step 1】 實作 SensorEventListener 介面
+// 寫下類別定義時，Android Studio 會提示要實作成員，這時順便讓 IDE 自動幫你產生 onSensorChanged 和 onAccuracyChanged
 class MainActivity : ComponentActivity(), SensorEventListener {
 
+    // 【Step 2】 宣告核心變數
+    // 這些是你要控制感測器與連結 ViewModel 的必要工具
     private val viewModel: GameViewModel by viewModels()
     private lateinit var sensorManager: SensorManager
     private var gyroSensor: Sensor? = null
@@ -38,6 +24,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 【Step 3】 初始化感測器與掛載 UI
+        // 先讓畫面能跑起來，這時候紅點還不會動是正常的
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
@@ -46,16 +35,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null || event.sensor.type != Sensor.TYPE_GYROSCOPE) return
-        if (timestamp != 0L) {
-            val dt = (event.timestamp - timestamp) * 1.0e-9f
-            // 將感測器數據交由 ViewModel 處理運算
-            viewModel.processSensorData(event.values[0], event.values[1], dt)
-        }
-        timestamp = event.timestamp
-    }
-
+    // 【Step 4】 生命週期管控
+    // 寫完 onCreate 後，先寫這兩個。確保你的感測器有「開關」，這對節省手機電量非常重要
     override fun onResume() {
         super.onResume()
         gyroSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
@@ -66,223 +47,26 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
+    // 介面要求必須存在，通常不寫內容
+    // 不寫會報錯
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
-}
+    // 【Step 5】 實作數據傳輸邏輯
+    // 這是最後一步，將硬體數值餵給 ViewModel。放在最後是因為它最容易出數學計算錯誤
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null || event.sensor.type != Sensor.TYPE_GYROSCOPE) return
 
+        // 判斷場景：只在遊戲中消耗資源
+        if (viewModel.currentScene == GameScene.PLAYING) {
+            if (timestamp != 0L) {
+                // 微積分時間差：dt = (T2 - T1) / 1,000,000,000
+                val dt = (event.timestamp - timestamp) * 1.0e-9f
 
-@Composable
-fun AngleTestScreen(viewModel: GameViewModel) {
-    // 根據 ViewModel 的場景切換畫面
-    when (viewModel.currentScene) {
-        GameScene.START -> StartScreen(onStart = { viewModel.startGame() })
-        GameScene.PLAYING -> QuizPlayScreen(viewModel = viewModel)
-        GameScene.RESULT -> ResultScreen(
-            score = viewModel.score,
-            correct = viewModel.correctCount,
-            wrong = viewModel.wrongCount,
-            onRestart = { viewModel.backToStart() }
-        )
-    }
-}
-
-
-// --- 新增：起始頁面 ---
-@Composable
-fun StartScreen(onStart: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFF5F5F5))
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.gyroicon),
-            contentDescription = "Logo",
-            modifier = Modifier.size(120.dp)
-        )
-        Text(
-            text = "GyroQuiz",
-            fontSize = 40.sp,
-            fontWeight = FontWeight.Black,
-            color = Color(0xFF333333)
-        )
-        Text("體感知識競賽", fontSize = 18.sp, color = Color.Gray)
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("遊戲規則：", fontWeight = FontWeight.Bold)
-                Text("1. 傾斜手機控制紅點移動。")
-                Text("2. 將紅點停留在選項上 2 秒作答。")
-                Text("3. 答錯將鎖定 5 秒無法移動。")
+                // 傳遞給 ViewModel 進行物理運算
+                viewModel.processSensorData(event.values[0], event.values[1], dt)
             }
         }
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        Button(
-            onClick = onStart,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66C2EE))
-        ) {
-            Text("開始挑戰", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-
-// --- 新增：結算頁面 ---
-@Composable
-fun ResultScreen(score: Int, correct: Int, wrong: Int, onRestart: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFFE8F5E9)).padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("挑戰結束！", fontSize = 32.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(24.dp))
-
-        Text("總分", fontSize = 20.sp)
-        Text("$score", fontSize = 80.sp, fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("答對", color = Color.Gray)
-                Text("$correct", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("答錯", color = Color.Gray)
-                Text("$wrong", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(64.dp))
-
-        OutlinedButton(
-            onClick = onRestart,
-            modifier = Modifier.fillMaxWidth().height(56.dp)
-        ) {
-            Text("返回主選單", fontSize = 18.sp)
-        }
-    }
-}
-
-
-// 將原本 QuizPlay 的內容封裝到這個 Composable
-@Composable
-fun QuizPlayScreen(viewModel: GameViewModel) {
-    // 從 ViewModel 讀取狀態
-    var screenSize by remember { mutableStateOf(IntSize.Zero) }
-    val density = LocalDensity.current
-    var progress by remember { mutableFloatStateOf(0f) }
-    val remainingSeconds = viewModel.lockRemainingSeconds // 這是觀測型數據
-    val currentQuestion = viewModel.currentQuestion
-    val isLocked = viewModel.isLocked()
-    val isShowingFeedback = viewModel.isShowingFeedback()
-    val selectedOption = viewModel.selectedOption
-
-    val bgColor = when (viewModel.feedback) {
-        FeedbackType.CORRECT -> Color(0xFFE8F5E9)
-        FeedbackType.WRONG -> Color(0xFFFFEBEE)
-        else -> if (isLocked) Color(0xFFFFEBEE) else Color.White
+        timestamp = event.timestamp
     }
 
-    // --- [核心邏輯 C：長按判定] ---
-    // LaunchedEffect 會在 selectedOption 改變時重啟
-    LaunchedEffect(viewModel.selectedOption, viewModel.isLocked()) {
-        // 如果沒選選項或被鎖定，歸零進度並退出
-        if (viewModel.selectedOption == "" || viewModel.isLocked()) {
-            progress = 0f
-            return@LaunchedEffect
-        }
 
-        // 模擬「進度條填充」效果
-        while (viewModel.selectedOption != "" && !viewModel.isLocked()) {
-            val duration = 2000L // 需停留在區域內 2 秒
-            val start = System.currentTimeMillis()
-            while (System.currentTimeMillis() - start < duration) {
-                // 如果填充中途移出區域，立即停止
-                if (viewModel.selectedOption == "") {
-                    progress = 0f
-                    return@LaunchedEffect
-                }
-                // 更新填充百分比 (0.0 ~ 1.0)
-                progress = (System.currentTimeMillis() - start).toFloat() / duration
-                delay(16) // 約 60 FPS
-            }
-            // 填充完成，提交答案
-            viewModel.submitAnswer(viewModel.selectedOption)
-            progress = 0f // 答完題歸零
-            delay(2000L) // 答題後的暫停時間，讓玩家看清楚對錯
-        }
-    }
-
-    // --- [核心邏輯 D：解析度適配] ---
-    Box(modifier = Modifier.fillMaxSize().background(bgColor).onGloballyPositioned { screenSize = it.size }) {
-        // --- 替換為 GameConfig 參數 ---
-        // ... 選項佈局 ...
-        AnswerBox(Modifier.fillMaxWidth().fillMaxHeight(GameConfig.BOUND_OPTION_A_BOTTOM).align(Alignment.TopCenter), "A: ${currentQuestion.options[0]}", selectedOption == "A")
-        AnswerBox(Modifier.fillMaxWidth().fillMaxHeight(1f - GameConfig.BOUND_OPTION_B_TOP).align(Alignment.BottomCenter), "B: ${currentQuestion.options[1]}", selectedOption == "B")
-        AnswerBox(Modifier.fillMaxHeight().fillMaxWidth(GameConfig.BOUND_OPTION_C_RIGHT).align(Alignment.CenterStart), "C:\n${currentQuestion.options[2]}", selectedOption == "C")
-        AnswerBox(Modifier.fillMaxHeight().fillMaxWidth(1f - GameConfig.BOUND_OPTION_D_LEFT).align(Alignment.CenterEnd), "D:\n${currentQuestion.options[3]}", selectedOption == "D")
-
-        Column(modifier = Modifier.align(Alignment.Center).padding(horizontal = 95.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("得分: ${viewModel.score} | 對: ${viewModel.correctCount} 錯: ${viewModel.wrongCount}", fontSize = 14.sp, color = Color.Gray)
-
-            Box(Modifier.height(60.dp), contentAlignment = Alignment.Center) {
-                if (isShowingFeedback) {
-                    Text(
-                        text = if (viewModel.feedback == FeedbackType.CORRECT) "✨ 恭喜答對！ ✨" else "❌ 答錯了！ ❌",
-                        fontSize = 24.sp, fontWeight = FontWeight.Black,
-                        color = if (viewModel.feedback == FeedbackType.CORRECT) Color(0xFF2E7D32) else Color(0xFFC62828)
-                    )
-                }
-            }
-
-            Text("Q: ${currentQuestion.text}", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-            if (remainingSeconds > 0) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "鎖定中 (${remainingSeconds}s)",
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = { viewModel.calibrateCenter() }) { Text("校正中心點") }
-        }
-
-        if (screenSize.width > 0) {
-            val animProgress by animateFloatAsState(progress)
-            with(density) {
-                Box(
-                    Modifier.offset(
-                        // 【關鍵公式】：百分比 * 螢幕總寬度 = 實際像素位置
-                        // 再減去游標半徑 (12.5.dp)，讓游標中心點對準計算位置
-                        x = (viewModel.cursorX * screenSize.width).toDp() - 12.5.dp,
-                        y = (viewModel.cursorY * screenSize.height).toDp() - 12.5.dp).size(25.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // 游標與進度環渲染...
-                    if (progress > 0f) {
-                        CircularProgressIndicator(progress = { animProgress }, modifier = Modifier.requiredSize(46.dp), color = Color(0xFFE91E63), strokeWidth = 4.dp)
-                    }
-                    Box(Modifier.fillMaxSize().background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun AnswerBox(modifier: Modifier, text: String, isActive: Boolean) {
-    val color = if (isActive) Color(0xFF4CAF50) else Color(0xFFE0E0E0).copy(0.3f)
-    Box(modifier.background(color).border(1.dp, Color.LightGray.copy(0.3f)), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.Black, color = if (isActive) Color.White else Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp))
-    }
 }
