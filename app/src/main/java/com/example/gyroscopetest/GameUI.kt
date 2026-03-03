@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -176,7 +177,8 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
                 if (viewModel.isShowingFeedback()) {
                     Text(
                         text = if (viewModel.feedback == FeedbackType.CORRECT) "✨ 答對了！" else "❌ 答錯了！",
-                        fontSize = 26.sp, fontWeight = FontWeight.Black,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
                         color = if (viewModel.feedback == FeedbackType.CORRECT) Color(0xFF2E7D32) else Color(0xFFC62828)
                     )
                 }
@@ -281,4 +283,12 @@ fun AnswerBox(modifier: Modifier, text: String, isActive: Boolean) {
             modifier = Modifier.padding(8.dp)
         )
     }
+}
+
+
+@Preview
+@Composable
+fun Test() {
+    //AnswerBox(modifier = Modifier.padding(16.dp).fillMaxWidth(),"測試",true)
+    //ResultScreen(0,0, 0, onRestart = {})
 }
