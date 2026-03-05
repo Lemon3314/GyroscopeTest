@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -20,7 +21,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.delay
 
 /**
@@ -111,16 +111,17 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
                 progress = (System.currentTimeMillis() - start).toFloat() / duration
                 delay(16)
             }
+            // 觸發答題後，ViewModel 會自動將游標 reset，selectedOption 變 ""，
+            // 從而終止此 LaunchedEffect 的執行，不再需要額外 delay。
             viewModel.submitAnswer(viewModel.selectedOption)
             progress = 0f
-            delay(1500L) // 答完題後的視覺停頓
         }
     }
 
-    // 依據狀態決定背景色
+    // 【修改】依據狀態決定遊戲區"底層"背景色
+    // 正確/錯誤的綠色紅色已經交給遮罩了，這裡只保留鎖定中的淺紅警告色
     val bgColor = when {
-        viewModel.feedback == FeedbackType.CORRECT -> Color(0xFFE8F5E9) // 正確綠
-        viewModel.feedback == FeedbackType.WRONG || viewModel.isLocked() -> Color(0xFFFFEBEE) // 錯誤紅
+        viewModel.isLocked() -> Color(0xFFFFEBEE) // 錯誤紅 (鎖定殘留)
         else -> Color.White
     }
 
@@ -172,24 +173,12 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
         ) {
             Text("得分: ${viewModel.score} | 對: ${viewModel.correctCount} 錯: ${viewModel.wrongCount}", fontSize = 14.sp, color = Color.Gray)
 
-            // 正確/錯誤 動態回饋文字
-            Box(
-                Modifier.height(60.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (viewModel.isShowingFeedback()) {
-                    Text(
-                        text = if (viewModel.feedback == FeedbackType.CORRECT) "✨ 答對了！" else "❌ 答錯了！",
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (viewModel.feedback == FeedbackType.CORRECT) Color(0xFF2E7D32) else Color(0xFFC62828)
-                    )
-                }
-            }
+            // 【修改】原「正確/錯誤 動態回饋文字」已移至全螢幕遮罩，保留 Spacer 維持排版高度
+            Spacer(Modifier.height(60.dp))
 
             Text("Q: ${viewModel.currentQuestion.text}", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
 
-            // 鎖定狀態顯示c
+            // 鎖定狀態顯示
             if (viewModel.lockRemainingSeconds > 0) {
                 Spacer(Modifier.height(8.dp))
                 Text("鎖定中 (${viewModel.lockRemainingSeconds}s)", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -225,6 +214,43 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
                     }
                     // "游標紅點本體"
                     Box(Modifier.fillMaxSize().background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
+                }
+            }
+        }
+
+        // --- 🌟 全螢幕遮罩層 (Overlay) 🌟 ---
+        // 必須放在 Box 內部結構的最下方，才能覆蓋在所有 UI 元件的最上層
+        if (viewModel.feedback != FeedbackType.NONE) {
+            // 設定 90% 不透明度 (0xEE)，讓玩家隱約看到底層已經切換好的新題目
+            val overlayColor = if (viewModel.feedback == FeedbackType.CORRECT) {
+                Color(0xEE4CAF50) // 綠色
+            } else {
+                Color(0xEEDB4437) // 紅色
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(overlayColor)
+                    // 攔截所有觸控事件，防止玩家在遮罩期間亂點按鈕
+                    .clickable(enabled = false) {},
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = if (viewModel.feedback == FeedbackType.CORRECT) "✨ 答對了！" else "❌ 答錯了！",
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val isLast = viewModel.currentIndexInShuffled >= GameConfig.MAX_QUESTIONS - 1
+                    Text(
+                        text = if (isLast) "準備結算..." else "準備下一題...",
+                        fontSize = 20.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
                 }
             }
         }
@@ -295,6 +321,6 @@ fun AnswerBox(modifier: Modifier, text: String, isActive: Boolean) {
 fun Test() {
     //AnswerBox(modifier = Modifier.padding(16.dp).fillMaxWidth(),"測試",true)
     //ResultScreen(0,0, 0, onRestart = {})
-    //tartScreen {  }
+    //StartScreen {  }
     //QuizPlayScreen(viewModel = GameViewModel(SavedStateHandle()))
 }

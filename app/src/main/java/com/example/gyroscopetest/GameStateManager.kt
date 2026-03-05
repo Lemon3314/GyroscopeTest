@@ -156,9 +156,8 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     }
 
     /**
-     * 答題提交
+     * 答題提交 (🔥 統一的遮罩式邏輯)
      */
-    // 2. 統一的提交邏輯：先處理數據存檔，再處理等待跳題
     fun submitAnswer(answerCode: String) {
         if (isShowingFeedback() || isLocked()) return
 
@@ -175,30 +174,30 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
             startLockTimer()
         }
 
-        resetCursor()
-        // 這裡先存一次存檔 (分數與鎖定狀態)，防止玩家刷分
+        resetCursor() // 游標立刻回中間
+
+        // --- B. 立即更新後台題目 (玩家被遮罩擋住看不到) ---
+        val isLastQuestion = currentIndexInShuffled >= GameConfig.MAX_QUESTIONS - 1
+        if (!isLastQuestion) {
+            currentIndexInShuffled++
+        }
+
+        // 這裡先存一次存檔 (分數、題號與鎖定狀態都最新了)，防止玩家刷分
         persist()
 
-        // --- B. 處理「等待與跳題」的非同步邏輯 ---
+        // --- C. 處理「遮罩消失」的非同步邏輯 ---
         sumbitJob?.cancel()
         sumbitJob = viewModelScope.launch {
-            // 等待反饋與鎖定都結束
-            while (isShowingFeedback() || isLocked()) {
-                delay(50)
-            }
+            // 只需等待 1.5 秒讓玩家看清楚遮罩動畫
+            delay(1500)
 
-            // --- C. 同步更新「題目」與「回饋狀態」 ---
-            // 當協程醒來時，這兩行會幾乎同時執行，UI 就不會閃爍
-            if (currentIndexInShuffled < GameConfig.MAX_QUESTIONS - 1) {
-                currentIndexInShuffled++
-            } else {
+            // 時間到，手動清空回饋 (遮罩瞬間消失，露出早已換好的新題目)
+            feedback = FeedbackType.NONE
+
+            // 如果是最後一題，等遮罩拿掉後才切換到結算畫面
+            if (isLastQuestion) {
                 finishGame()
             }
-
-            // 【重要】手動清空回饋，這會讓背景瞬間變白，並同時看到下一題
-            feedback = FeedbackType.NONE
-            resetCursor()
-            persist() // 跳題後再存一次存檔
         }
     }
 
@@ -224,29 +223,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         }
     }
 
-    private fun goToNextQuestion() {
-        sumbitJob?.cancel()
-        sumbitJob = viewModelScope.launch {
-            // 1. 等待時間結束
-            while (isShowingFeedback() || isLocked()) {
-                delay(50) // 縮短檢查時間讓反應更靈敏
-            }
-
-            // 2. 【關鍵同步】同時改變題目索引與重設反饋顏色
-            // 在這兩行之間 UI 不會刷新，所以看起來是同步的
-            if (currentIndexInShuffled < GameConfig.MAX_QUESTIONS - 1) {
-                currentIndexInShuffled++
-            } else {
-                finishGame()
-            }
-
-            feedback = FeedbackType.NONE // 手動清空反饋，讓背景變白
-
-
-            resetCursor() // 確保紅點回到中心
-            persist()
-        }
-    }
+    // (goToNextQuestion 函式已刪除，因為邏輯全部統一到 submitAnswer 中了)
 
     private fun resetCursor() {
         cursorX = 0.5f
@@ -275,7 +252,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         timerJob = viewModelScope.launch {
             while (isLocked()) {
                 val remaining = lockUntilTimestamp - System.currentTimeMillis()
-                // 這樣 5000ms 會顯示 5，4001ms 也會顯示 5
+                // 【修正 6 秒問題】：加上 999 再除，這樣 5000ms 會顯示 5，4001ms 也會顯示 5
                 lockRemainingSeconds = ((remaining + 999) / 1000).toInt()
                 delay(250) // 縮短檢查時間，讓數字跳動更即時
             }
