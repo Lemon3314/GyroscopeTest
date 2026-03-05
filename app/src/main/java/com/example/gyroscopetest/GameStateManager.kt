@@ -63,15 +63,23 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     private var shuffledIndices: List<Int> = savedState.get<List<Int>>("indices")
         ?: QuizRepository.questions.indices.shuffled()
 
+    //鎖定的時間 (未來時間點)
     private var lockUntilTimestamp by mutableLongStateOf(savedState["lockUntil"] ?: 0L)
+    //反饋的時間 (未來時間點)
     private var feedbackUntilTimestamp by mutableLongStateOf(0L)
+    //倒數計時cancel掉上一個
+    private var timerJob: Job? = null
+    //cancel掉 submitAnswer
+    private var sumbitJob: Job? = null
+
+
 
     // 物理運算變數
     private var angleX = 0f
     private var angleY = 0f
     private var offsetPitch = 0f
     private var offsetRoll = 0f
-    private var timerJob: Job? = null
+
 
     // ==========================================
     // 4. 初始化與計算屬性
@@ -93,6 +101,15 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         wrongCount = 0
         currentIndexInShuffled = 0
         shuffledIndices = QuizRepository.questions.indices.shuffled()
+
+        // 強制重設所有時間與 Job
+        lockUntilTimestamp = 0L
+        feedbackUntilTimestamp = 0L
+        lockRemainingSeconds = 0
+        feedback = FeedbackType.NONE
+
+        timerJob?.cancel()
+        sumbitJob?.cancel() // 也要把跳題協程砍掉
 
         currentScene = GameScene.PLAYING
         calibrateCenter()
@@ -141,9 +158,11 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     /**
      * 答題提交
      */
+    // 2. 統一的提交邏輯：先處理數據存檔，再處理等待跳題
     fun submitAnswer(answerCode: String) {
         if (isShowingFeedback() || isLocked()) return
 
+        // --- A. 立即處理數據 (就算 App 崩潰，這部分也要先保住) ---
         if (answerCode == currentQuestion.correctAnswerCode) {
             score += 10
             correctCount++
@@ -152,17 +171,39 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
             score = (score - 5).coerceAtLeast(0)
             wrongCount++
             triggerFeedback(FeedbackType.WRONG, 1500)
-
-            // 處發 5 秒懲罰
             lockUntilTimestamp = System.currentTimeMillis() + 5000
             startLockTimer()
         }
 
-        goToNextQuestion()
         resetCursor()
+        // 這裡先存一次存檔 (分數與鎖定狀態)，防止玩家刷分
         persist()
+
+        // --- B. 處理「等待與跳題」的非同步邏輯 ---
+        sumbitJob?.cancel()
+        sumbitJob = viewModelScope.launch {
+            // 等待反饋與鎖定都結束
+            while (isShowingFeedback() || isLocked()) {
+                delay(50)
+            }
+
+            // --- C. 同步更新「題目」與「回饋狀態」 ---
+            // 當協程醒來時，這兩行會幾乎同時執行，UI 就不會閃爍
+            if (currentIndexInShuffled < GameConfig.MAX_QUESTIONS - 1) {
+                currentIndexInShuffled++
+            } else {
+                finishGame()
+            }
+
+            // 【重要】手動清空回饋，這會讓背景瞬間變白，並同時看到下一題
+            feedback = FeedbackType.NONE
+            resetCursor()
+            persist() // 跳題後再存一次存檔
+        }
     }
 
+
+    //校準中心
     fun calibrateCenter() {
         offsetPitch = Math.toDegrees(angleX.toDouble()).toFloat()
         offsetRoll = Math.toDegrees(angleY.toDouble()).toFloat()
@@ -184,10 +225,26 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     }
 
     private fun goToNextQuestion() {
-        if (currentIndexInShuffled < GameConfig.MAX_QUESTIONS - 1) {
-            currentIndexInShuffled++
-        } else {
-            finishGame()
+        sumbitJob?.cancel()
+        sumbitJob = viewModelScope.launch {
+            // 1. 等待時間結束
+            while (isShowingFeedback() || isLocked()) {
+                delay(50) // 縮短檢查時間讓反應更靈敏
+            }
+
+            // 2. 【關鍵同步】同時改變題目索引與重設反饋顏色
+            // 在這兩行之間 UI 不會刷新，所以看起來是同步的
+            if (currentIndexInShuffled < GameConfig.MAX_QUESTIONS - 1) {
+                currentIndexInShuffled++
+            } else {
+                finishGame()
+            }
+
+            feedback = FeedbackType.NONE // 手動清空反饋，讓背景變白
+
+
+            resetCursor() // 確保紅點回到中心
+            persist()
         }
     }
 
@@ -204,11 +261,8 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
 
     fun isLocked(): Boolean = System.currentTimeMillis() < lockUntilTimestamp
 
-    fun isShowingFeedback(): Boolean {
-        val active = System.currentTimeMillis() < feedbackUntilTimestamp
-        if (!active && feedback != FeedbackType.NONE) feedback = FeedbackType.NONE
-        return active
-    }
+    // 只負責回傳布林值，不要偷偷改變狀態
+    fun isShowingFeedback(): Boolean = System.currentTimeMillis() < feedbackUntilTimestamp
 
     private fun calculatePush(angle: Float, thres: Float): Float = when {
         angle > thres -> angle - thres
@@ -221,14 +275,16 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         timerJob = viewModelScope.launch {
             while (isLocked()) {
                 val remaining = lockUntilTimestamp - System.currentTimeMillis()
-                lockRemainingSeconds = (remaining / 1000).toInt() + 1
-                delay(500)
+                // 這樣 5000ms 會顯示 5，4001ms 也會顯示 5
+                lockRemainingSeconds = ((remaining + 999) / 1000).toInt()
+                delay(250) // 縮短檢查時間，讓數字跳動更即時
             }
             lockRemainingSeconds = 0
         }
     }
 
     //feedback不需要persist(接續)
+    //共7個變數需要
     private fun persist() {
         savedState["scene"] = currentScene
         savedState["score"] = score

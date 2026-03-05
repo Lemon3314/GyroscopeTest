@@ -39,11 +39,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     // 寫完 onCreate 後，先寫這兩個。確保你的感測器有「開關」，這對節省手機電量非常重要
     override fun onResume() {
         super.onResume()
+        // 開始監聽：設定頻率為 SENSOR_DELAY_GAME（適合遊戲的高頻率）
         gyroSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
     }
 
     override fun onPause() {
         super.onPause()
+        // 停止監聽：APP 跳到後台時立刻關閉，否則會極度耗電
         sensorManager.unregisterListener(this)
     }
 

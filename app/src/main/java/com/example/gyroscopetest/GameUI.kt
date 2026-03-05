@@ -20,6 +20,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.delay
 
 /**
@@ -90,7 +91,9 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
     val density = LocalDensity.current
     var progress by remember { mutableFloatStateOf(0f) }
 
+
     // 【邏輯：長按判定】當停留區域改變時重啟
+    //輔助進度增加
     LaunchedEffect(viewModel.selectedOption, viewModel.isLocked()) {
         if (viewModel.selectedOption == "" || viewModel.isLocked()) {
             progress = 0f
@@ -207,10 +210,11 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
                             x = (viewModel.cursorX * screenSize.width).toDp() - 12.5.dp,
                             y = (viewModel.cursorY * screenSize.height).toDp() - 12.5.dp
                         )
+                        //Box(球)的大小
                         .size(25.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // 停留時顯示的進度圓圈
+                    // 停留時顯示的 "進度圓圈"
                     if (progress > 0f) {
                         CircularProgressIndicator(
                             progress = { animProgress },
@@ -219,7 +223,7 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
                             strokeWidth = 4.dp
                         )
                     }
-                    // 游標紅點本體
+                    // "游標紅點本體"
                     Box(Modifier.fillMaxSize().background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
                 }
             }
@@ -291,4 +295,6 @@ fun AnswerBox(modifier: Modifier, text: String, isActive: Boolean) {
 fun Test() {
     //AnswerBox(modifier = Modifier.padding(16.dp).fillMaxWidth(),"測試",true)
     //ResultScreen(0,0, 0, onRestart = {})
+    //tartScreen {  }
+    //QuizPlayScreen(viewModel = GameViewModel(SavedStateHandle()))
 }
