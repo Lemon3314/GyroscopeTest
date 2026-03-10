@@ -32,6 +32,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     // ==========================================
 
     // 場景與分數
+    //5項
     var currentScene by mutableStateOf(savedState["scene"] ?: GameScene.START)
         private set
     var score by mutableIntStateOf(savedState["score"] ?: 0)
@@ -44,6 +45,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         private set
 
     // 游標與交互
+    //3項
     var cursorX by mutableFloatStateOf(0.5f)
         private set
     var cursorY by mutableFloatStateOf(0.5f)
@@ -52,6 +54,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         private set
 
     // 回饋與鎖定狀態
+    //2項
     var feedback by mutableStateOf(FeedbackType.NONE)
         private set
     var lockRemainingSeconds by mutableIntStateOf(0)
@@ -60,6 +63,8 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     // ==========================================
     // 3. 內部控制變數 (Private States)
     // ==========================================
+
+    //5項
     private var shuffledIndices: List<Int> = savedState.get<List<Int>>("indices")
         ?: QuizRepository.questions.indices.shuffled()
 
@@ -75,6 +80,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
 
 
     // 物理運算變數
+    //4項
     private var angleX = 0f
     private var angleY = 0f
     private var offsetPitch = 0f
@@ -96,10 +102,13 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     // 5. 場景導航 (Navigation)
     // ==========================================
     fun startGame() {
+        currentScene = GameScene.PLAYING
         score = 0
         correctCount = 0
         wrongCount = 0
         currentIndexInShuffled = 0
+
+
         shuffledIndices = QuizRepository.questions.indices.shuffled()
 
         // 強制重設所有時間與 Job
@@ -111,7 +120,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         timerJob?.cancel()
         sumbitJob?.cancel() // 也要把跳題協程砍掉
 
-        currentScene = GameScene.PLAYING
+
         calibrateCenter()
         persist()
     }
@@ -177,10 +186,11 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         resetCursor() // 游標立刻回中間
 
         // --- B. 立即更新後台題目 (玩家被遮罩擋住看不到) ---
-        val isLastQuestion = currentIndexInShuffled >= GameConfig.MAX_QUESTIONS - 1
+        val isLastQuestion = currentIndexInShuffled == GameConfig.MAX_QUESTIONS - 1
         if (!isLastQuestion) {
             currentIndexInShuffled++
         }
+//        currentIndexInShuffled++
 
         // 這裡先存一次存檔 (分數、題號與鎖定狀態都最新了)，防止玩家刷分
         persist()
@@ -188,6 +198,7 @@ class GameViewModel(private val savedState: SavedStateHandle) : ViewModel() {
         // --- C. 處理「遮罩消失」的非同步邏輯 ---
         sumbitJob?.cancel()
         sumbitJob = viewModelScope.launch {
+
             // 只需等待 1.5 秒讓玩家看清楚遮罩動畫
             delay(1500)
 

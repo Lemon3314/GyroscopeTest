@@ -21,6 +21,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.delay
 
 /**
@@ -61,7 +62,9 @@ fun StartScreen(onStart: () -> Unit) {
         Spacer(modifier = Modifier.height(48.dp))
 
         // 規則卡片
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(Modifier.padding(16.dp)) {
                 Text("遊戲規則：", fontWeight = FontWeight.Bold, color = Color.Black)
                 Text("• 傾斜手機控制紅點移動。", color = Color.DarkGray)
@@ -87,10 +90,8 @@ fun StartScreen(onStart: () -> Unit) {
  */
 @Composable
 fun QuizPlayScreen(viewModel: GameViewModel) {
-    var screenSize by remember { mutableStateOf(IntSize.Zero) }
-    val density = LocalDensity.current
+    var screenSize by remember { mutableStateOf(IntSize.Zero) } //獲取螢幕大小
     var progress by remember { mutableFloatStateOf(0f) }
-
 
     // 【邏輯：長按判定】當停留區域改變時重啟
     //輔助進度增加
@@ -148,10 +149,11 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
             viewModel.selectedOption == "B"
         )
 
-        AnswerBox(Modifier
-            .fillMaxHeight()
-            .fillMaxWidth(GameConfig.BOUND_OPTION_C_RIGHT)
-            .align(Alignment.CenterStart),
+        AnswerBox(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(GameConfig.BOUND_OPTION_C_RIGHT)
+                .align(Alignment.CenterStart),
             "C:\n${viewModel.currentQuestion.options[2]}",
             viewModel.selectedOption == "C"
         )
@@ -188,70 +190,101 @@ fun QuizPlayScreen(viewModel: GameViewModel) {
             OutlinedButton(onClick = { viewModel.calibrateCenter() }) { Text("校正中心點") }
         }
 
-        // --- 核心：體感游標繪製 ---
-        if (screenSize.width > 0) {
-            val animProgress by animateFloatAsState(progress) // 讓進度環轉動更平滑
-            with(density) {
-                Box(
-                    Modifier
-                        .offset(
-                            // 【百分比轉像素公式】
-                            x = (viewModel.cursorX * screenSize.width).toDp() - 12.5.dp,
-                            y = (viewModel.cursorY * screenSize.height).toDp() - 12.5.dp
-                        )
-                        //Box(球)的大小
-                        .size(25.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // 停留時顯示的 "進度圓圈"
-                    if (progress > 0f) {
-                        CircularProgressIndicator(
-                            progress = { animProgress },
-                            modifier = Modifier.requiredSize(46.dp),
-                            color = Color(0xFFE91E63),
-                            strokeWidth = 4.dp
-                        )
-                    }
-                    // "游標紅點本體"
-                    Box(Modifier.fillMaxSize().background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
-                }
-            }
+        // --- 呼叫抽離出的體感游標 ---
+        GyroCursor(
+            cursorX = viewModel.cursorX,
+            cursorY = viewModel.cursorY,
+            screenSize = screenSize,
+            progress = progress
+        )
+
+        // --- 呼叫抽離出的全螢幕遮罩層 ---
+        val isLastQuestion = viewModel.currentIndexInShuffled == GameConfig.MAX_QUESTIONS - 1
+        QuizFeedbackOverlay(
+            feedback = viewModel.feedback,
+            isLast = isLastQuestion
+        )
+    }
+}
+// --- 新增：全螢幕遮罩層 Composable ---
+@Composable
+fun QuizFeedbackOverlay(
+    feedback: FeedbackType,
+    isLast: Boolean
+) {
+    // --- 🌟 全螢幕遮罩層 (Overlay) 🌟 ---
+    // 必須放在 Box 內部結構的最下方，才能覆蓋在所有 UI 元件的最上層
+    if (feedback != FeedbackType.NONE) {
+        // 設定 90% 不透明度 (0xEE)，讓玩家隱約看到底層已經切換好的新題目
+        val overlayColor = if (feedback == FeedbackType.CORRECT) {
+            Color(0x804CAF50) // 綠色
+        } else {
+            Color(0x80DB4437) // 紅色
         }
 
-        // --- 🌟 全螢幕遮罩層 (Overlay) 🌟 ---
-        // 必須放在 Box 內部結構的最下方，才能覆蓋在所有 UI 元件的最上層
-        if (viewModel.feedback != FeedbackType.NONE) {
-            // 設定 90% 不透明度 (0xEE)，讓玩家隱約看到底層已經切換好的新題目
-            val overlayColor = if (viewModel.feedback == FeedbackType.CORRECT) {
-                Color(0xEE4CAF50) // 綠色
-            } else {
-                Color(0xEEDB4437) // 紅色
-            }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(overlayColor)
+                // 攔截所有觸控事件，防止玩家在遮罩期間亂點按鈕
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = if (feedback == FeedbackType.CORRECT) "✨ 答對了！" else "❌ 答錯了！",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(16.dp))
 
+                Text(
+                    text = if (isLast) "準備結算..." else "準備下一題...",
+                    fontSize = 20.sp,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+
+// --- 新增：體感游標 Composable ---
+@Composable
+fun GyroCursor(
+    cursorX: Float,
+    cursorY: Float,
+    screenSize: IntSize,
+    progress: Float
+) {
+    val density = LocalDensity.current //取得空間翻譯官(關鍵的單位轉換區塊.toDp()
+
+    // --- 核心：體感游標繪製 ---
+    if (screenSize.width > 0) {
+        val animProgress by animateFloatAsState(progress) // 讓進度環轉動更平滑
+        with(density) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(overlayColor)
-                    // 攔截所有觸控事件，防止玩家在遮罩期間亂點按鈕
-                    .clickable(enabled = false) {},
+                Modifier
+                    .offset(
+                        // 【百分比轉像素公式】
+                        x = (cursorX * screenSize.width).toDp() - 12.5.dp,
+                        y = (cursorY * screenSize.height).toDp() - 12.5.dp
+                    )
+                    //Box(球)的大小
+                    .size(25.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (viewModel.feedback == FeedbackType.CORRECT) "✨ 答對了！" else "❌ 答錯了！",
-                        fontSize = 48.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val isLast = viewModel.currentIndexInShuffled >= GameConfig.MAX_QUESTIONS - 1
-                    Text(
-                        text = if (isLast) "準備結算..." else "準備下一題...",
-                        fontSize = 20.sp,
-                        color = Color.White.copy(alpha = 0.8f)
+                // 停留時顯示的 "進度圓圈"
+                if (progress > 0f) {
+                    CircularProgressIndicator(
+                        progress = { animProgress },
+                        modifier = Modifier.requiredSize(46.dp),
+                        color = Color(0xFFE91E63),
+                        strokeWidth = 4.dp
                     )
                 }
+                // "游標紅點本體"
+                Box(Modifier.fillMaxSize().background(Color(0xFFE91E63), CircleShape).border(2.dp, Color.White, CircleShape))
             }
         }
     }

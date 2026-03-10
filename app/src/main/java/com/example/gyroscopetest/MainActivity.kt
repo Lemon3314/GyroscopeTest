@@ -27,7 +27,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         // 【Step 3】 初始化感測器與掛載 UI
         // 先讓畫面能跑起來，這時候紅點還不會動是正常的
+
+
+        //向系統申請感測器管理員
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+
+        //找到陀螺儀感測器
         gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
         setContent {
@@ -38,13 +43,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     // 【Step 4】 生命週期管控
     // 寫完 onCreate 後，先寫這兩個。確保你的感測器有「開關」，這對節省手機電量非常重要
     override fun onResume() {
-        super.onResume()
+        super.onResume() //  告訴系統：請先執行 Activity 預設的恢復動作
         // 開始監聽：設定頻率為 SENSOR_DELAY_GAME（適合遊戲的高頻率）
         gyroSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
     }
 
     override fun onPause() {
-        super.onPause()
+        super.onPause() //  告訴系統：請準備好進入暫停狀態
         // 停止監聽：APP 跳到後台時立刻關閉，否則會極度耗電
         sensorManager.unregisterListener(this)
     }
@@ -52,6 +57,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     // 介面要求必須存在，通常不寫內容
     // 不寫會報錯
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+
+
+
     // 【Step 5】 實作數據傳輸邏輯
     // 這是最後一步，將硬體數值餵給 ViewModel。放在最後是因為它最容易出數學計算錯誤
     override fun onSensorChanged(event: SensorEvent?) {
